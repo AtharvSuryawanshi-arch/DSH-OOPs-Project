@@ -1,0 +1,26 @@
+# Environment
+.env
+*.local
+
+# Java / Maven
+backend/target/
+*.class
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.iml
+
+# OS
+.DS_Store
+
+# Local development / QA caches
+.npm-cache/
+.m2/
+.qa/
+.project-spec.txt
