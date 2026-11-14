@@ -233,7 +233,7 @@ SLA or Reports page.
 │       ├── main/resources/
 │       │   ├── application.yml
 │       │   └── db/migration/    # Flyway schema
-│       └── test/                # 33 unit tests + Testcontainers integration test
+│       └── test/                # 40 unit tests + 4 Testcontainers integration tests
 ├── frontend/
 │   ├── src/
 │   │   ├── api/                 # typed client + domain types
@@ -325,7 +325,7 @@ curl -s http://localhost:8080/api/incidents?priority=P1\&slaStatus=BREACHED \
 ## Testing
 
 ```bash
-cd backend && ./mvnw test        # 33 unit tests + 1 Testcontainers integration test
+cd backend && ./mvnw test        # 40 unit tests + 4 Testcontainers integration tests
 cd frontend && npm run lint      # oxlint
 cd frontend && npm run build     # TypeScript project build + production bundle
 ```
@@ -354,8 +354,9 @@ Implemented:
 
 - BCrypt password hashing; passwords are never returned by the API.
 - Stateless HS384 JWT authentication with expiration.
-- Role-based method security and per-incident ownership checks (employees can only see/report their
-  own incidents; technicians only their assigned incidents; admins see the organisation).
+- Role-based method security and per-incident ownership checks: every role can report incidents;
+  everyone sees the incidents they reported, technicians also see incidents assigned to them, and admins
+  see the organisation. Only the reporter can verify a resolution or leave feedback.
 - Internal notes are hidden from employees at the API layer.
 - Bean Validation on all request DTOs and RFC 9457 `ProblemDetail` error responses.
 - CORS allow-list, input length limits and HTTP status/exception mapping.

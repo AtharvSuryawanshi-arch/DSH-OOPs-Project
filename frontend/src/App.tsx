@@ -6,6 +6,7 @@ import { RegisterPage } from './auth/RegisterPage'
 import { AppShell } from './components/AppShell'
 import { PageLoader } from './components/ui'
 import { DashboardPage } from './pages/DashboardPage'
+import { EmployeeHomePage } from './pages/EmployeeHomePage'
 import { IncidentDetailPage } from './pages/IncidentDetailPage'
 import { IncidentsPage } from './pages/IncidentsPage'
 import { MyWorkPage } from './pages/MyWorkPage'
@@ -41,6 +42,12 @@ function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }
   return children
 }
 
+/** Employees get a simple "my requests" home; technicians and admins get the operational dashboard. */
+function HomePage() {
+  const { user } = useAuth()
+  return user?.role === 'EMPLOYEE' ? <EmployeeHomePage /> : <DashboardPage />
+}
+
 function NotFound() {
   return (
     <div className="not-found">
@@ -60,12 +67,12 @@ export default function App() {
 
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<HomePage />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route
             path="incidents/new"
             element={
-              <RequireRole roles={['EMPLOYEE', 'ADMIN']}>
+              <RequireRole roles={['EMPLOYEE', 'TECHNICIAN', 'ADMIN']}>
                 <NewIncidentPage />
               </RequireRole>
             }

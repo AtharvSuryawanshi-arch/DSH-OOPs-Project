@@ -5,12 +5,15 @@ import {
   Bell,
   Boxes,
   BriefcaseBusiness,
+  House,
   LayoutDashboard,
   LogOut,
   Menu,
+  Moon,
   Plus,
   ScrollText,
   SlidersHorizontal,
+  Sun,
   Ticket,
   Timer,
   Users,
@@ -20,6 +23,7 @@ import {
 import { useAuth } from '../auth/auth-context'
 import { Avatar, Logo, RoleBadge } from './ui'
 import { NotificationBell } from './NotificationBell'
+import { useTheme } from '../lib/theme'
 
 interface NavItem {
   to: string
@@ -35,13 +39,12 @@ interface NavGroup {
 
 function groupsFor(role: string): NavGroup[] {
   const workspace: NavItem[] = [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-    { to: '/incidents', label: role === 'EMPLOYEE' ? 'My incidents' : 'Incidents', icon: Ticket },
+    { to: '/', label: role === 'EMPLOYEE' ? 'Home' : 'Dashboard', icon: role === 'EMPLOYEE' ? House : LayoutDashboard, end: true },
+    { to: '/incidents', label: role === 'EMPLOYEE' ? 'My requests' : 'Incidents', icon: Ticket },
+    // Every role can report an incident with their own account.
+    { to: '/incidents/new', label: 'Report incident', icon: Plus },
   ]
 
-  if (role === 'EMPLOYEE' || role === 'ADMIN') {
-    workspace.push({ to: '/incidents/new', label: 'Report incident', icon: Plus })
-  }
   if (role === 'TECHNICIAN') {
     workspace.push({ to: '/my-work', label: 'My queue', icon: BriefcaseBusiness })
   }
@@ -89,6 +92,7 @@ export function AppShell() {
   const { user, logout } = useAuth()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { theme, toggle: toggleTheme } = useTheme()
   const groups = groupsFor(user?.role ?? 'EMPLOYEE')
 
   if (!user) {
@@ -140,6 +144,17 @@ export function AppShell() {
               <span>{user.role === 'TECHNICIAN' ? user.department || 'Support engineer' : user.email}</span>
             </div>
           </div>
+          <button
+            type="button"
+            className="theme-toggle"
+            role="switch"
+            aria-checked={theme === 'dark'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
+            <span>Dark mode</span>
+            <span className="theme-toggle-track" aria-hidden="true"><span /></span>
+          </button>
           <div className="sidebar-user-actions">
             <RoleBadge role={user.role} />
             <button type="button" className="icon-button icon-button-dark" onClick={logout} aria-label="Sign out">
@@ -175,11 +190,9 @@ export function AppShell() {
             </div>
           </div>
           <div className="topbar-actions">
-            {(user.role === 'EMPLOYEE' || user.role === 'ADMIN') && (
-              <Link to="/incidents/new" className="button button-primary button-sm topbar-cta">
-                <Plus size={16} /> New incident
-              </Link>
-            )}
+            <Link to="/incidents/new" className="button button-primary button-sm topbar-cta">
+              <Plus size={16} /> New incident
+            </Link>
             <NotificationBell />
             <Link to="/notifications" className="topbar-avatar" aria-label="View profile notifications">
               <Avatar name={user.name} size="sm" />

@@ -35,13 +35,7 @@ import {
   StatCard,
 } from '../components/ui'
 import { formatMinutes } from '../lib/format'
-
-const priorityColors: Record<Priority, string> = {
-  P1: '#dc2626',
-  P2: '#ea580c',
-  P3: '#2563eb',
-  P4: '#64748b',
-}
+import { useChartColors } from '../lib/theme'
 
 export function ReportsPage() {
   const { user } = useAuth()
@@ -49,6 +43,7 @@ export function ReportsPage() {
   const [scanning, setScanning] = useState(false)
   const [scanMessage, setScanMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const colors = useChartColors()
 
   if (!user) {
     return null
@@ -71,7 +66,7 @@ export function ReportsPage() {
 
   const data = dashboard.data
   const maxService = Math.max(...data.byService.map((item) => item.count), 1)
-  const priorityData = data.byPriority.map((item) => ({ ...item, color: priorityColors[item.key as Priority] }))
+  const priorityData = data.byPriority.map((item) => ({ ...item, color: colors.priority[item.key as Priority] }))
 
   async function runScan() {
     setScanning(true)
@@ -117,12 +112,12 @@ export function ReportsPage() {
           <div className="chart-box chart-box-large">
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={data.trend} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="4 4" stroke="#e7eaf0" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#8a90a2' }} axisLine={false} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#8a90a2' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e7eaf0', fontSize: 12 }} />
-                <Bar dataKey="created" name="Created" fill="#4f46e5" radius={[5, 5, 0, 0]} />
-                <Bar dataKey="resolved" name="Resolved" fill="#10b981" radius={[5, 5, 0, 0]} />
+                <CartesianGrid strokeDasharray="4 4" stroke={colors.grid} vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: colors.axis }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: colors.axis }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${colors.tooltip.border}`, background: colors.tooltip.background, color: colors.tooltip.color, fontSize: 12 }} />
+                <Bar dataKey="created" name="Created" fill={colors.created} radius={[5, 5, 0, 0]} />
+                <Bar dataKey="resolved" name="Resolved" fill={colors.resolved} radius={[5, 5, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -136,7 +131,7 @@ export function ReportsPage() {
                 <Pie data={priorityData} dataKey="count" nameKey="key" innerRadius={58} outerRadius={86} paddingAngle={4} stroke="none">
                   {priorityData.map((entry) => <Cell key={entry.key} fill={entry.color} />)}
                 </Pie>
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e7eaf0', fontSize: 12 }} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${colors.tooltip.border}`, background: colors.tooltip.background, color: colors.tooltip.color, fontSize: 12 }} />
               </PieChart>
             </ResponsiveContainer>
           </div>

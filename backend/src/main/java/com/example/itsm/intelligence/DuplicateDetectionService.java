@@ -5,6 +5,7 @@ import com.example.itsm.incident.Incident;
 import com.example.itsm.incident.IncidentRepository;
 import com.example.itsm.incident.IncidentStatus;
 import com.example.itsm.incident.IncidentStatusGroups;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +19,10 @@ import java.util.List;
 public class DuplicateDetectionService {
 
     private static final double CANDIDATE_THRESHOLD = 0.30;
+    private static final int LOOKBACK_DAYS = 30;
+    private static final int MAX_CANDIDATES = 500;
+    /** Ids start at 1, so this excludes nothing when there is no incident to exclude yet. */
+    private static final long NO_INCIDENT = -1L;
 
     private final IncidentRepository incidentRepository;
     private final Clock clock;
@@ -34,12 +39,15 @@ public class DuplicateDetectionService {
             Long serviceId,
             Long excludeIncidentId
     ) {
-        Instant since = clock.instant().minus(30, ChronoUnit.DAYS);
-        List<Incident> candidates = incidentRepository.findAllDetailed().stream()
-                .filter(candidate -> IncidentStatusGroups.DUPLICATE_SCOPE.contains(candidate.getStatus()))
-                .filter(candidate -> candidate.getCreatedAt() != null && candidate.getCreatedAt().isAfter(since))
-                .filter(candidate -> excludeIncidentId == null || !candidate.getId().equals(excludeIncidentId))
-                .toList();
+        Instant since = clock.instant().minus(LOOKBACK_DAYS, ChronoUnit.DAYS);
+        // The database does the cheap filtering (status, age, exclusion) and returns at most the
+        // newest MAX_CANDIDATES rows, instead of loading every incident into memory.
+        List<Incident> candidates = incidentRepository.findDuplicateCandidates(
+                IncidentStatusGroups.DUPLICATE_SCOPE,
+                since,
+                excludeIncidentId == null ? NO_INCIDENT : excludeIncidentId,
+                PageRequest.of(0, MAX_CANDIDATES)
+        );
 
         return candidates.stream()
                 .map(candidate -> {

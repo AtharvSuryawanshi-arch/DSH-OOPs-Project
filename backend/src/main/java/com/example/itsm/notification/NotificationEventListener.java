@@ -2,25 +2,24 @@ package com.example.itsm.notification;
 
 import com.example.itsm.incident.Incident;
 import com.example.itsm.user.User;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
+/**
+ * Observer: reacts to domain events by deciding WHO should hear about them and WHAT to say.
+ * HOW the message is delivered (in-app, email, …) is left to {@link NotificationDispatcher}.
+ */
 @Component
 public class NotificationEventListener {
 
-    private static final Logger log = LoggerFactory.getLogger(NotificationEventListener.class);
-
-    private final NotificationService notificationService;
+    private final NotificationDispatcher dispatcher;
     private final NotificationRecipients recipients;
 
-    public NotificationEventListener(NotificationService notificationService, NotificationRecipients recipients) {
-        this.notificationService = notificationService;
+    public NotificationEventListener(NotificationDispatcher dispatcher, NotificationRecipients recipients) {
+        this.dispatcher = dispatcher;
         this.recipients = recipients;
     }
 
@@ -180,15 +179,7 @@ public class NotificationEventListener {
             String title,
             String message
     ) {
-        for (User target : targets) {
-            if (target == null || !target.isActive()) {
-                continue;
-            }
-            notificationService.send(NotificationChannel.IN_APP, target, incident, type, title, message);
-            notificationService.send(NotificationChannel.EMAIL, target, incident, type, title, message);
-            log.info("[SIMULATED EMAIL] To: {} <{}> | Subject: {} | {}",
-                    target.getName(), target.getEmail(), title, message);
-        }
+        dispatcher.dispatch(targets, incident, type, title, message);
     }
 
     private void add(Map<Long, User> targets, User user) {

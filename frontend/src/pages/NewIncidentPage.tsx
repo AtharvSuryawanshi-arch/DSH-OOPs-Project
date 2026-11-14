@@ -13,6 +13,7 @@ import { errorMessage, incidentApi, intelligenceApi } from '../api/client'
 import type { Category, Impact, IntelligencePreview, Service, Urgency } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { Field, Flash, PageHeader, PriorityBadge, WarningNote } from '../components/ui'
+import { DuplicateList } from '../components/DuplicateList'
 import { titleCase } from '../lib/format'
 
 const impacts: Array<{ value: Impact; label: string; description: string; tone: string }> = [
@@ -298,17 +299,7 @@ export function NewIncidentPage() {
                   {preview.possibleDuplicates.length === 0 ? (
                     <p className="muted small">No close matches in the recent incident history.</p>
                   ) : (
-                    <ul className="duplicate-list">
-                      {preview.possibleDuplicates.map((duplicate) => (
-                        <li key={duplicate.incidentId}>
-                          <Link to={`/incidents/${duplicate.incidentId}`} target="_blank">
-                            <span>{duplicate.reference}</span>
-                            <strong>{duplicate.title}</strong>
-                            <em>{Math.round(duplicate.score * 100)}% match</em>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
+                    <DuplicateList duplicates={preview.possibleDuplicates} newTab />
                   )}
                 </div>
               </div>

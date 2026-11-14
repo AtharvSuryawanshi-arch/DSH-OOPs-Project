@@ -75,13 +75,11 @@ public class AssignmentService {
 
     @Transactional
     public Incident assignManually(Incident incident, Long technicianId, User actor) {
-        if (incident.getStatus() == IncidentStatus.CLOSED
-                || incident.getStatus() == IncidentStatus.CANCELLED
-                || incident.getStatus() == IncidentStatus.RESOLVED
-                || incident.getStatus() == IncidentStatus.VERIFIED) {
+        // Fail early with a clear message; the state classes would refuse anyway.
+        if (!incident.getStatus().isActiveWork()) {
             throw new BusinessRuleException(
                     "ASSIGNMENT_NOT_ALLOWED",
-                    "Technicians cannot be assigned once an incident is resolved or closed."
+                    "Technicians cannot be assigned once an incident is resolved, closed or cancelled."
             );
         }
 
@@ -113,6 +111,14 @@ public class AssignmentService {
     }
 
     private void assignInternal(Incident incident, Technician technician, User actor, String reason) {
+        // Both automatic and manual assignment pass through here, so this rule always holds.
+        if (incident.getReporter().getId().equals(technician.getId())) {
+            throw new BusinessRuleException(
+                    "SELF_ASSIGNMENT_NOT_ALLOWED",
+                    technician.getName() + " reported this incident and cannot also be assigned to it."
+            );
+        }
+
         Technician previous = incident.getAssignedTechnician();
         boolean reassignment = previous != null;
         if (reassignment && previous.getId().equals(technician.getId())) {
@@ -120,14 +126,12 @@ public class AssignmentService {
         }
 
         IncidentStatus fromStatus = incident.getStatus();
-        incident.assignTechnician(technician);
-
-        if (fromStatus == IncidentStatus.CLASSIFIED) {
-            workflowService.changeStatus(incident, IncidentStatus.ASSIGNED);
-        } else if (fromStatus == IncidentStatus.NEW) {
-            workflowService.changeStatus(incident, IncidentStatus.CLASSIFIED);
-            workflowService.changeStatus(incident, IncidentStatus.ASSIGNED);
+        if (fromStatus == IncidentStatus.NEW) {
+            workflowService.classify(incident);
         }
+        // Polymorphism: ClassifiedState assigns and moves to ASSIGNED; Assigned/Acknowledged/InProgress
+        // states just swap the technician; resolved or closed states refuse.
+        workflowService.assign(incident, technician);
 
         auditService.record(
                 incident,

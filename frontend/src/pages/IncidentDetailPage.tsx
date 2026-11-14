@@ -48,6 +48,8 @@ import {
   WarningNote,
 } from '../components/ui'
 import { formatDateTime, formatDue, isOverdue, timeAgo, titleCase } from '../lib/format'
+import { LifecycleTracker } from '../components/LifecycleTracker'
+import { DuplicateList } from '../components/DuplicateList'
 
 type ModalKind = 'assign' | 'resolve' | 'close' | 'feedback' | 'priority' | 'cancel' | 'edit' | null
 
@@ -57,7 +59,8 @@ export function IncidentDetailPage() {
   const { user } = useAuth()
   const location = useLocation()
 
-  const detail = useApi<Incident>(`/incidents/${incidentId}`)
+  // Polls quietly so the reporter and the technician see each other's steps without refreshing.
+  const detail = useApi<Incident>(`/incidents/${incidentId}`, { pollMs: 10_000 })
   const duplicates = useApi<DuplicateCandidate[]>(`/incidents/${incidentId}/duplicates`)
   const suggestions = useApi<ResolutionSuggestion[]>(`/incidents/${incidentId}/suggested-resolutions`)
   const recommendations = useApi<TechnicianRecommendation[]>(`/incidents/${incidentId}/recommended-technicians`)
@@ -283,23 +286,12 @@ export function IncidentDetailPage() {
               {technicianAction.label}
             </button>
           )}
-          {canVerify && (
-            <button
-              type="button"
-              className="button button-success"
-              disabled={actionLoading !== null}
-              onClick={() => void execute('verify', () => incidentApi.verify(incident.id))}
-            >
-              {actionLoading === 'verify' ? <LoaderCircle className="spin" size={16} /> : <CheckCircle2 size={16} />}
-              Verify resolution
-            </button>
-          )}
           {canFeedback && (
             <button type="button" className="button button-secondary" onClick={() => openModal('feedback')}>
               <Star size={16} /> Leave feedback
             </button>
           )}
-          {canReopen && (
+          {canReopen && !isReporter && (
             <button
               type="button"
               className="button button-ghost"
@@ -338,6 +330,43 @@ export function IncidentDetailPage() {
       </header>
 
       {actionError && <Flash tone="error">{actionError}</Flash>}
+
+      <LifecycleTracker incident={incident} viewerIsReporter={isReporter} />
+
+      {canVerify && (
+        <section className="confirm-fix" aria-labelledby="confirm-fix-title">
+          <h2 id="confirm-fix-title">Is it working for you now?</h2>
+          {incident.resolutionNotes && (
+            <div className="confirm-fix-notes">
+              <span>What {incident.technicianName ?? 'the technician'} did</span>
+              <p>{incident.resolutionNotes}</p>
+            </div>
+          )}
+          <div className="confirm-fix-actions">
+            <button
+              type="button"
+              className="button button-success"
+              disabled={actionLoading !== null}
+              onClick={() => void execute('verify', () => incidentApi.verify(incident.id))}
+            >
+              {actionLoading === 'verify' ? <LoaderCircle className="spin" size={16} /> : <CheckCircle2 size={16} />}
+              Yes, it&apos;s fixed
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={actionLoading !== null}
+              onClick={() => void execute('reopen', () => incidentApi.reopen(incident.id))}
+            >
+              {actionLoading === 'reopen' ? <LoaderCircle className="spin" size={16} /> : <RotateCcw size={16} />}
+              No, still broken
+            </button>
+          </div>
+          <p className="confirm-fix-hint">
+            “Still broken” sends it back to {incident.technicianName ?? 'the technician'}. The service desk can only close it after you confirm.
+          </p>
+        </section>
+      )}
 
       <div className="incident-detail-grid">
         <div className="stack">
@@ -385,17 +414,7 @@ export function IncidentDetailPage() {
                 </p>
               )}
               {sortedDuplicates.length > 0 && (
-                <ul className="duplicate-list">
-                  {sortedDuplicates.map((duplicate) => (
-                    <li key={duplicate.incidentId}>
-                      <Link to={`/incidents/${duplicate.incidentId}`}>
-                        <span>{duplicate.reference}</span>
-                        <strong>{duplicate.title}</strong>
-                        <em>{Math.round(duplicate.score * 100)}% match</em>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
+                <DuplicateList duplicates={sortedDuplicates} />
               )}
             </section>
           )}

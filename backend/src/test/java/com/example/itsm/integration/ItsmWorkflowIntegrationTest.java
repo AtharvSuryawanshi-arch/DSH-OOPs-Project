@@ -116,6 +116,12 @@ class ItsmWorkflowIntegrationTest {
                 Role.TECHNICIAN, "Tech User", "tech@test.local",
                 passwordEncoder.encode("Tech@123"), null, null, null, 5, 8, Set.of(category)
         ));
+        // A second technician without matching skills: skill-based assignment still prefers
+        // Tech User, so this one is only picked when Tech User is the reporter.
+        userRepository.save(userFactory.create(
+                Role.TECHNICIAN, "Tech Two", "tech2@test.local",
+                passwordEncoder.encode("Tech@123"), null, null, null, 2, 8, Set.of()
+        ));
 
         settingsService.set(SettingsService.ASSIGNMENT_STRATEGY, "SKILL_BASED");
         settingsService.set(SettingsService.AUTO_ASSIGN, "true");
@@ -196,6 +202,203 @@ class ItsmWorkflowIntegrationTest {
         assertThat(detailBody.get("version").asLong()).isGreaterThan(0);
         assertThat(detailBody.get("affectedUsers").asInt()).isEqualTo(500);
         assertThat(detailBody.get("comments").size()).isZero();
+    }
+
+    @Test
+    void technicianCanReportOwnIncidentButIsNeverAssignedToIt() throws Exception {
+        String reporterTechToken = login("tech@test.local", "Tech@123");
+        String otherTechToken = login("tech2@test.local", "Tech@123");
+        String employeeToken = login("employee@test.local", "Employee@123");
+        String adminToken = login("admin@test.local", "Admin@123");
+        long reporterTechId = userRepository.findByEmailIgnoreCase("tech@test.local").orElseThrow().getId();
+
+        // A technician can report an incident with their own account...
+        JsonNode created = createIncident(reporterTechToken, "Technician laptop VPN client crashes on start");
+        long incidentId = created.get("id").asLong();
+        // ...and is skipped by auto-assignment, so the other technician gets it.
+        assertThat(created.get("status").asText()).isEqualTo("ASSIGNED");
+        assertThat(created.get("technicianName").asText()).isEqualTo("Tech Two");
+
+        // The reporting technician can open the incident and finds it in their list.
+        mockMvc.perform(get("/api/incidents/" + incidentId)
+                        .header("Authorization", "Bearer " + reporterTechToken))
+                .andExpect(status().isOk());
+        MvcResult list = mockMvc.perform(get("/api/incidents")
+                        .param("search", "VPN client crashes")
+                        .header("Authorization", "Bearer " + reporterTechToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(objectMapper.readTree(list.getResponse().getContentAsString()).get("content").size())
+                .isEqualTo(1);
+
+        // An administrator cannot manually assign the incident to its own reporter either.
+        mockMvc.perform(post("/api/incidents/" + incidentId + "/assign")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"technicianId\":" + reporterTechId + "}"))
+                .andExpect(status().isConflict());
+
+        // Verifying before the incident is resolved breaks the lifecycle rules.
+        transition("/api/incidents/" + incidentId + "/verify", reporterTechToken)
+                .andExpect(status().isConflict());
+
+        resolveAs(otherTechToken, incidentId);
+
+        // The reporter can reopen; another employee cannot.
+        transition("/api/incidents/" + incidentId + "/reopen", employeeToken)
+                .andExpect(status().isForbidden());
+        transition("/api/incidents/" + incidentId + "/reopen", reporterTechToken)
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/incidents/" + incidentId + "/resolve")
+                        .header("Authorization", "Bearer " + otherTechToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionNotes\":\"Reinstalled the VPN client and cleared its cache.\"}"))
+                .andExpect(status().isOk());
+
+        // Nobody except the reporter can verify: not another employee, the assigned technician or an admin.
+        transition("/api/incidents/" + incidentId + "/verify", employeeToken)
+                .andExpect(status().isForbidden());
+        transition("/api/incidents/" + incidentId + "/verify", otherTechToken)
+                .andExpect(status().isForbidden());
+        transition("/api/incidents/" + incidentId + "/verify", adminToken)
+                .andExpect(status().isForbidden());
+
+        MvcResult verified = transition("/api/incidents/" + incidentId + "/verify", reporterTechToken)
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(objectMapper.readTree(verified.getResponse().getContentAsString()).get("status").asText())
+                .isEqualTo("VERIFIED");
+
+        // Feedback is also reporter-only, whatever the reporter's role.
+        mockMvc.perform(post("/api/incidents/" + incidentId + "/feedback")
+                        .header("Authorization", "Bearer " + otherTechToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rating\":5}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/incidents/" + incidentId + "/feedback")
+                        .header("Authorization", "Bearer " + reporterTechToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rating\":4,\"comment\":\"Fixed quickly\"}"))
+                .andExpect(status().isOk());
+
+        transition("/api/incidents/" + incidentId + "/close", adminToken)
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void adminReportedIncidentIsVerifiedByTheAdminAndCanClose() throws Exception {
+        String adminToken = login("admin@test.local", "Admin@123");
+        String techToken = login("tech@test.local", "Tech@123");
+        String employeeToken = login("employee@test.local", "Employee@123");
+
+        JsonNode created = createIncident(adminToken, "Admin console payment report export times out");
+        long incidentId = created.get("id").asLong();
+        assertThat(created.get("technicianName").asText()).isEqualTo("Tech User");
+
+        resolveAs(techToken, incidentId);
+
+        // Before the fix, only employees could verify, so this incident was stuck at RESOLVED.
+        transition("/api/incidents/" + incidentId + "/verify", employeeToken)
+                .andExpect(status().isForbidden());
+        transition("/api/incidents/" + incidentId + "/verify", adminToken)
+                .andExpect(status().isOk());
+        MvcResult closed = transition("/api/incidents/" + incidentId + "/close", adminToken)
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(objectMapper.readTree(closed.getResponse().getContentAsString()).get("status").asText())
+                .isEqualTo("CLOSED");
+    }
+
+    @Test
+    void duplicateWarningsHideIncidentsTheViewerMayNotOpen() throws Exception {
+        String employeeToken = login("employee@test.local", "Employee@123");
+        String reportingTechToken = login("tech2@test.local", "Tech@123");
+        String adminToken = login("admin@test.local", "Admin@123");
+        String description = "The quarterly ledger zebra export stalls at ninety percent and the ledger zebra file is empty.";
+
+        JsonNode employeeReport = createIncident(employeeToken, "Ledger zebra export stalls", description);
+        JsonNode techReport = createIncident(reportingTechToken, "Ledger zebra export stalls again", description);
+        String employeeRef = employeeReport.get("reference").asText();
+        String techRef = techReport.get("reference").asText();
+
+        // The technician reported their own incident, but the employee's similar one is not theirs:
+        // it is listed (so they know it exists) without its id or title.
+        JsonNode techView = getJson("/api/incidents/" + techReport.get("id").asLong() + "/duplicates", reportingTechToken);
+        JsonNode hidden = findByReference(techView, employeeRef);
+        assertThat(hidden.get("accessible").asBoolean()).isFalse();
+        assertThat(hidden.hasNonNull("title")).isFalse();
+        assertThat(hidden.hasNonNull("incidentId")).isFalse();
+
+        // An administrator sees the same match in full.
+        JsonNode adminView = getJson("/api/incidents/" + techReport.get("id").asLong() + "/duplicates", adminToken);
+        JsonNode visible = findByReference(adminView, employeeRef);
+        assertThat(visible.get("accessible").asBoolean()).isTrue();
+        assertThat(visible.get("title").asText()).isEqualTo("Ledger zebra export stalls");
+
+        // The report-form preview applies the same rule: own report in full, someone else's without title.
+        MvcResult preview = mockMvc.perform(post("/api/intelligence/classify")
+                        .header("Authorization", "Bearer " + employeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "title", "Ledger zebra export stalls",
+                                "description", description,
+                                "serviceId", 1
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode previewDuplicates = objectMapper.readTree(preview.getResponse().getContentAsString()).get("possibleDuplicates");
+        assertThat(findByReference(previewDuplicates, employeeRef).get("accessible").asBoolean()).isTrue();
+        assertThat(findByReference(previewDuplicates, techRef).get("accessible").asBoolean()).isFalse();
+        assertThat(findByReference(previewDuplicates, techRef).hasNonNull("title")).isFalse();
+    }
+
+    private JsonNode getJson(String path, String token) throws Exception {
+        MvcResult result = mockMvc.perform(get(path).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    private JsonNode findByReference(JsonNode duplicates, String reference) {
+        for (JsonNode duplicate : duplicates) {
+            if (duplicate.get("reference").asText().equals(reference)) {
+                return duplicate;
+            }
+        }
+        throw new AssertionError("No duplicate with reference " + reference + " in " + duplicates);
+    }
+
+    private JsonNode createIncident(String token, String title) throws Exception {
+        return createIncident(token, title, "Reported during permission testing; the application keeps failing.");
+    }
+
+    private JsonNode createIncident(String token, String title, String description) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/incidents")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "title", title,
+                                "description", description,
+                                "serviceId", 1,
+                                "impact", "HIGH",
+                                "urgency", "HIGH",
+                                "affectedUsers", 500
+                        ))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    private void resolveAs(String techToken, long incidentId) throws Exception {
+        transition("/api/incidents/" + incidentId + "/acknowledge", techToken)
+                .andExpect(status().isOk());
+        transition("/api/incidents/" + incidentId + "/start", techToken)
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/incidents/" + incidentId + "/resolve")
+                        .header("Authorization", "Bearer " + techToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionNotes\":\"Applied the documented fix and confirmed it works.\"}"))
+                .andExpect(status().isOk());
     }
 
     private String login(String email, String password) throws Exception {

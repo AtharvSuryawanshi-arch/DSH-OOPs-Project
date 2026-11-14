@@ -8,7 +8,13 @@ interface QueryState<T> {
   error: string | null
 }
 
-export function useApi<T>(path: string) {
+interface UseApiOptions {
+  /** Re-fetch quietly in the background every N ms (no loading spinner), e.g. for live hand-offs. */
+  pollMs?: number
+}
+
+export function useApi<T>(path: string, options: UseApiOptions = {}) {
+  const { pollMs } = options
   const [state, setState] = useState<QueryState<T>>({
     path,
     data: null,
@@ -47,6 +53,23 @@ export function useApi<T>(path: string) {
       controller.abort()
     }
   }, [path, version])
+
+  useEffect(() => {
+    if (!pollMs) {
+      return undefined
+    }
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setVersion((current) => current + 1)
+      }
+    }
+    const interval = window.setInterval(refreshIfVisible, pollMs)
+    window.addEventListener('focus', refreshIfVisible)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshIfVisible)
+    }
+  }, [pollMs])
 
   const loading = state.path !== path || state.loading
   const data = state.path === path ? state.data : null

@@ -23,7 +23,7 @@ workflow.
 
 The system goes beyond a basic CRUD application with rule-based auto-classification, duplicate
 incident detection, smart technician recommendations, SLA warning/breach detection, automatic
-escalation and suggested resolutions from historical incidents. It was validated with 34 automated
+escalation and suggested resolutions from historical incidents. It was validated with 44 automated
 tests (including a real PostgreSQL Testcontainers integration test) and 60+ documented scenarios
 covering authorization, invalid input, lifecycle rules and boundary conditions.
 
@@ -121,7 +121,7 @@ I-ITSM provides one integrated platform with:
 | Role | Capabilities |
 | --- | --- |
 | Employee | Register/login, report incidents, view own incidents, add information, verify resolution, provide feedback, receive notifications |
-| Technician | Login, view assigned incidents, acknowledge, start investigation, add internal/public notes, resolve, view workload, receive notifications |
+| Technician | Login, report incidents and verify their own, view assigned incidents, acknowledge, start investigation, add internal/public notes, resolve, view workload, receive notifications |
 | Administrator | Manage users, technicians and skills; manage services/categories; configure SLAs; choose assignment strategy; monitor incidents and SLA breaches; view reports and audit logs; assign/reassign; override priority; close/cancel |
 
 ### 2.2 Functional requirements
@@ -144,8 +144,9 @@ I-ITSM provides one integrated platform with:
 - FR-2.5 Administrators can assign/reassign, override priority, cancel early incidents and close
   verified incidents.
 - FR-2.6 Technicians can acknowledge, start and resolve assigned incidents with notes.
-- FR-2.7 Reporters can verify a resolution, reopen a resolved incident and leave feedback.
+- FR-2.7 Reporters (of any role) can verify a resolution, reopen a resolved incident and leave feedback.
 - FR-2.8 The system rejects invalid lifecycle transitions.
+- FR-2.9 Any authenticated user can report an incident; the reporter is never assigned to their own incident.
 
 **FR-3 Priority management**
 
@@ -175,7 +176,7 @@ I-ITSM provides one integrated platform with:
 - FR-6.2 Simulated email notifications are persisted and logged.
 - FR-6.3 Creation, assignment, status change, comments, SLA warning/breach, escalation and duplicate
   detection produce notifications.
-- FR-6.4 New channels can be added by extending the event listener without changing the domain.
+- FR-6.4 New channels are added as a new `NotificationSender` class; the dispatcher, event listener and domain stay unchanged.
 
 **FR-7 Audit**
 
@@ -194,7 +195,7 @@ I-ITSM provides one integrated platform with:
 **FR-9 Intelligent features**
 
 - FR-9.1 Keyword-based auto-classification with confidence and rationale.
-- FR-9.2 Duplicate detection with similarity scores and linking.
+- FR-9.2 Duplicate detection with similarity scores and linking; matches the viewer may not open are shown without their title.
 - FR-9.3 Ranked technician recommendations.
 - FR-9.4 Suggested resolutions from similar resolved incidents.
 - FR-9.5 SLA risk detection and automatic escalation.
@@ -215,7 +216,7 @@ I-ITSM provides one integrated platform with:
 | Testability | Pure unit-testable rules + Testcontainers integration test |
 | Performance | Indexed filters, pagination, entity graphs, batched lazy loading |
 | Reliability | Transactions, optimistic locking, idempotent SLA monitor |
-| Usability | Role-specific dashboards, guided forms, visible SLA state, responsive UI |
+| Usability | Role-specific home pages, “Waiting on you” prompts, a progress tracker on every incident, plain-language SLA timing, light/dark mode, responsive UI |
 | Portability | Dockerised PostgreSQL; environment-driven config |
 | Observability | Actuator health, audit trail, structured logs with simulated email |
 | Extensibility | New categories/services/SLA policies from admin; new strategies/notifications by adding beans/listeners |
@@ -226,7 +227,7 @@ I-ITSM provides one integrated platform with:
 1. An incident cannot jump directly from NEW to CLOSED; the lifecycle must be followed.
 2. Only the reporter or an administrator can edit an incident, and only before assignment.
 3. Only the assigned technician can acknowledge/start/resolve.
-4. Only the reporter can verify and submit feedback.
+4. Only the reporter (whatever their role) can verify and submit feedback; a technician is never assigned an incident they reported.
 5. Only an admin can close a verified incident, cancel early incidents, reassign or override priority.
 6. Feedback is allowed after resolution, exactly once.
 7. A resolution target must be longer than its response target.
@@ -236,6 +237,7 @@ I-ITSM provides one integrated platform with:
 10. Service-specific SLA policies override global policies of the same priority.
 11. Internal notes are visible only to technicians and administrators.
 12. P1/P2 incidents not acknowledged by the response deadline escalate over time.
+13. Duplicate warnings never reveal the title of an incident the viewer is not allowed to open.
 
 ---
 
@@ -280,7 +282,7 @@ complexity during development. The backend is stateless; the JWT carries identit
 | Catalogue | Services with criticality, categories, activation |
 | SLA | Policy resolution, deadline arithmetic, status resolver, scheduled monitor, escalation |
 | Incident | Aggregate, lifecycle orchestration, search, DTOs, comments, access control |
-| Lifecycle | State pattern classes and transition validation |
+| Lifecycle | State classes that perform or refuse each lifecycle action |
 | Priority | Weighted priority strategy and explainable result |
 | Assignment | Candidate scoring, three strategies, recommendations |
 | Intelligence | Classification, duplicate similarity, suggested resolutions |
@@ -292,12 +294,16 @@ complexity during development. The backend is stateless; the JWT carries identit
 
 ### 3.4 Frontend structure
 
-- A role-aware navigation shell and protected routes.
-- Dashboard with KPI cards, Recharts trend/donut/bar charts and SLA watch.
+- A role-aware navigation shell and protected routes, with a light/dark mode switch.
+- Employee home: “Waiting on you” (confirm or reject a fix in one click), requests in progress with a
+  progress bar and plain-language timing, and recently fixed requests with a “Rate the fix” prompt.
+- Dashboard for technicians and administrators with KPI cards, Recharts trend/donut/bar charts, SLA watch
+  and the same “Waiting on you” prompt for incidents they reported.
 - Incident queue with search + six visible filters and pagination.
 - Report form with live smart-triage analysis and duplicate preview.
-- Incident detail with SLA clocks, metadata, duplicate warning, suggestions, comments/internal notes,
-  audit timeline and role-specific actions.
+- Incident detail with a six-step progress tracker, an “Is it working for you now?” card for the reporter,
+  SLA clocks, metadata, duplicate warning, suggestions, comments/internal notes, audit timeline and
+  role-specific actions. Dashboard, home and detail pages refresh themselves every 10–15 seconds.
 - Technician queue with capacity utilisation and deadline ordering.
 - Admin screens for users/skills, services/categories, SLA policies, assignment settings and audit.
 - Notification inbox with channel filters and unread handling.
@@ -365,7 +371,7 @@ classDiagram
     AssignmentStrategy <|.. LoadBasedAssignmentStrategy
     AssignmentStrategy <|.. RoundRobinAssignmentStrategy
 
-    class IncidentState { <<interface>> +status() IncidentStatus +allowedTransitions() Set~IncidentStatus~ }
+    class IncidentState { <<interface>> +status() IncidentStatus +verify(Incident) +reopen(Incident, Instant) +close(Incident, String, Instant) … one method per action }
     class NewState
     class ClosedState
     class CancelledState
@@ -378,6 +384,11 @@ One concrete `IncidentState` class exists for each status: `NEW`, `CLASSIFIED`, 
 `ACKNOWLEDGED`, `IN_PROGRESS`, `RESOLVED`, `VERIFIED`, `CLOSED` and `CANCELLED`. The state diagram in
 [4.3](#43-state-diagram) shows the transition graph. The full diagram with every state class and
 attribute is in [ARCHITECTURE.md](ARCHITECTURE.md#4-domain-model-class-diagram).
+
+Each state class decides what every lifecycle action does. `AbstractIncidentState` refuses all actions
+by default; for example only `ResolvedState` implements `verify()` and `reopen()`, and only
+`VerifiedState` implements `close()`, so an incident cannot be closed before the reporter confirms the
+fix. `IncidentService` simply asks the current state to perform the action.
 
 ### 4.2 Use-case diagram
 
@@ -409,6 +420,8 @@ flowchart LR
     E --> V
     E --> F
     E --> N
+    T --> C
+    T --> F
     T --> Q
     T --> W
     T --> L
@@ -461,14 +474,15 @@ stateDiagram-v2
 
 | Pattern | Implementation | Benefit |
 | --- | --- | --- |
-| State | `IncidentState` + concrete states | Illegal transitions rejected in one place |
+| State | `IncidentState` + concrete states | Each state performs the actions it allows and refuses the rest; no status `if` chains in services |
 | Strategy | Priority + three assignment strategies | Change algorithms without editing the service |
 | Factory | User, notification, strategy, state factories | Centralized creation |
 | Observer | Spring domain events + notification listener | Notifications/audit decoupled from workflow |
+| Strategy (channels) | `NotificationSender` per channel + `NotificationDispatcher` | New notification mechanism = one new class |
 | Repository | Spring Data JPA | Persistence abstraction and testability |
 | Builder | Demo incident seeder | Complex optional lifecycle data assembled readably |
-| Adapter | Simulated email channel | Real provider can replace it later |
-| Template method | Abstract state class | Reuses status/transition storage |
+| Adapter | `EmailNotificationSender` → `EmailGateway` (`LoggingEmailGateway` simulates it) | Real email provider plugs in as another gateway |
+| Template method | Abstract state class | Default refuse-everything behaviour that concrete states selectively override |
 | DTO/mapper | Request/response records + mapper | Stable API contracts, no entity leakage |
 
 ---
@@ -584,10 +598,12 @@ Implemented controls:
 - HS384 JWT with expiration; invalid/tampered tokens rejected.
 - All APIs except login/registration/health require authentication.
 - Method-level role checks plus service-level ownership checks:
-  - employees only see incidents they reported;
-  - technicians only see incidents assigned to them;
+  - every user sees incidents they reported;
+  - technicians also see incidents assigned to them;
   - admins have organisation-wide access;
-  - internal notes are filtered from employee responses.
+  - internal notes are filtered from employee responses;
+  - all of these rules live in one class, `IncidentAccessPolicy`, which duplicate detection also uses so
+    other people's incident titles are never revealed.
 - Bean Validation on request DTOs, maximum lengths and enum values.
 - RFC 9457 ProblemDetail responses; no stack traces or database details leaked.
 - CORS allow-list; configurable origins.
@@ -694,7 +710,7 @@ scale demands it. The existing strategy/state/event boundaries make these change
 
 ## 9. Testing and validation
 
-**Automated result:** 34/34 tests pass (33 unit + 1 integration). The integration test uses a real
+**Automated result:** 44/44 tests pass (40 unit + 4 integration). The integration test uses a real
 `postgres:17-alpine` Testcontainers instance and exercises the complete HTTP workflow.
 
 | Area | Automated tests | Manual verification |
@@ -748,7 +764,7 @@ The 15–20 minute video plan assigns each team member a module and a workflow s
 | Functionality implementation (MVP) | 60 | All mandatory modules: users, incidents, priority, assignment, SLA, notifications, audit, search/reporting, intelligence, persistence |
 | User experience | 10 | Role-specific responsive UI, dashboards, smart triage form, SLA clocks, admin screens |
 | Technical depth | 15 | Spring Security/JWT, JPA specifications, Testcontainers, event-driven notifications, optimistic locking, Flyway, reusable typed React architecture |
-| Testing & validation | 5 | 34 automated tests, 60+ documented cases, negative/boundary checks |
+| Testing & validation | 5 | 44 automated tests, 60+ documented cases, negative/boundary checks |
 | Innovation | 10 | Auto-classification, duplicate detection, technician recommendations, suggested resolutions, SLA risk detection, auto-escalation |
 | Documentation & presentation | 10 | README, architecture/UML, ER design, API reference, test catalogue, report and demo script |
 

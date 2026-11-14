@@ -57,7 +57,7 @@ export function IncidentsPage() {
   const incidents = useApi<PageResponse<Incident>>(path)
 
   const isAdmin = user?.role === 'ADMIN'
-  const canReport = user?.role === 'EMPLOYEE' || isAdmin
+  const canReport = Boolean(user)
   const hasFilters = Boolean(search || status || priority || categoryId || serviceId || slaStatus)
 
   function resetPageAnd(action: () => void) {
@@ -84,13 +84,13 @@ export function IncidentsPage() {
   return (
     <div className="stack">
       <PageHeader
-        eyebrow={isAdmin ? 'Organisation-wide queue' : user?.role === 'TECHNICIAN' ? 'Assigned to you' : 'Your reports'}
+        eyebrow={isAdmin ? 'Organisation-wide queue' : user?.role === 'TECHNICIAN' ? 'Assigned to you or reported by you' : 'Your reports'}
         title={isAdmin ? 'Incident queue' : user?.role === 'TECHNICIAN' ? 'My incidents' : 'My incidents'}
         description={
           isAdmin
             ? 'Search, filter and triage every incident in the organisation.'
             : user?.role === 'TECHNICIAN'
-              ? 'Incidents currently assigned to you, with SLA state and ownership.'
+              ? 'Incidents assigned to you plus any you reported yourself, with SLA state and ownership.'
               : 'Track the incidents you have reported and their resolution progress.'
         }
         actions={

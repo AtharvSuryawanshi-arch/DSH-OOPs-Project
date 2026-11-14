@@ -101,7 +101,7 @@ flowchart TB
 | `catalog` | IT services, business criticality, categories, active/inactive lifecycle |
 | `sla` | Global/service-specific policies, deadline arithmetic, SLA state, scheduled monitor, escalation |
 | `incident` | Incident aggregate, REST API, search/filter specifications, DTO mapping, comments |
-| `incident.lifecycle` | State pattern: allowed transitions and transition validation |
+| `incident.lifecycle` | State pattern: each state class performs the lifecycle actions it allows and refuses the rest |
 | `incident.priority` | Priority context/result and weighted strategy |
 | `incident.assignment` | Candidate scoring, three assignment strategies, recommendation service |
 | `incident.search` | JPA `Specification` filters and pagination query object |
@@ -253,7 +253,20 @@ classDiagram
         <<interface>>
         +status() IncidentStatus
         +allowedTransitions() Set~IncidentStatus~
-        +canTransitionTo(IncidentStatus) boolean
+        +classify(Incident)
+        +assign(Incident, Technician)
+        +acknowledge(Incident, Instant)
+        +start(Incident)
+        +resolve(Incident, String, Instant)
+        +verify(Incident)
+        +reopen(Incident, Instant)
+        +close(Incident, String, Instant)
+        +cancel(Incident, String, Instant)
+    }
+    class AbstractIncidentState {
+        <<abstract>>
+        every action refuses by default
+        #moveTo(Incident, IncidentStatus)
     }
     class NewState
     class ClassifiedState
@@ -340,12 +353,16 @@ flowchart LR
     E --> CM
     E --> FB
     T --> R
+    T --> CR
+    T --> FB
     T --> Q
     T --> ACK
     T --> RES
     T --> WL
     T --> CM
     A --> R
+    A --> CR
+    A --> FB
     A --> UM
     A --> CAT
     A --> SLA
@@ -379,10 +396,19 @@ stateDiagram-v2
     CANCELLED --> [*]
 ```
 
-Transitions are implemented with the **State pattern** (`IncidentState` and one class per status).
-`IncidentWorkflowService` asks the current state whether a transition is allowed and throws
-`InvalidStateTransitionException` (HTTP 409) otherwise. The API never exposes a generic
-“set status” endpoint; each action has an explicit endpoint, audit entry and permission check.
+Transitions are implemented with the **State pattern**. `IncidentState` declares one method per
+lifecycle action (`classify`, `assign`, `acknowledge`, `start`, `resolve`, `verify`, `reopen`,
+`close`, `cancel`). `AbstractIncidentState` refuses every action by default with an
+`InvalidStateTransitionException` (HTTP 409, e.g. “You cannot verify an incident that is Assigned.”),
+and each concrete state overrides only the actions that make sense for it, updating the incident as it
+moves on. For example `ResolvedState.verify()` moves to VERIFIED and `ResolvedState.reopen()` sends the
+incident back to IN_PROGRESS; `AssignedState.acknowledge()` records the response time and whether the
+response target was missed. `assign()` shows polymorphism: `ClassifiedState` assigns and moves to
+ASSIGNED, while `AssignedState`, `AcknowledgedState` and `InProgressState` only hand the incident to a
+different technician. `IncidentWorkflowService` is the pattern's context: it looks up the current
+state and delegates, so `IncidentService` contains no `if (status == …)` checks. The API never
+exposes a generic “set status” endpoint; each action has an explicit endpoint, audit entry and
+permission check.
 
 ## 7. Runtime sequence: employee reports an incident
 
@@ -491,11 +517,12 @@ availability so an administrator can make an informed manual choice.
 | **State** | `incident.lifecycle.*` | Encapsulates allowed transitions and prevents invalid lifecycle jumps |
 | **Strategy** | `PriorityStrategy`, `AssignmentStrategy` + implementations | Priority algorithm and technician selection are independently replaceable |
 | **Factory** | `UserFactory`, `NotificationFactory`, `AssignmentStrategyFactory`, `IncidentStateFactory` | Centralises creation and removes switch statements from services |
-| **Observer / event-driven** | Spring `ApplicationEventPublisher` + `NotificationEventListener` | Notifications and audit side-effects are decoupled from core workflow |
+| **Observer / event-driven** | Spring `ApplicationEventPublisher` + `NotificationEventListener` | Notifications and audit side-effects are decoupled from core workflow; the listener decides who is told and what, not how |
+| **Strategy (notification channels)** | `NotificationSender` with `InAppNotificationSender` and `EmailNotificationSender`, run by `NotificationDispatcher` | Spring injects every sender, so a new mechanism (SMS, push) is one new class; the dispatcher never names a channel |
 | **Repository** | Spring Data JPA repositories | Persistence abstraction; domain services do not write SQL |
 | **Builder** | `DemoDataSeeder.SeedBuilder` | Builds realistic incidents with many optional lifecycle fields |
-| **Adapter (simulated)** | `EMAIL` channel in notification listener | A real provider can replace the log-based adapter without touching domain code |
-| **Template method** | `AbstractIncidentState` | Shares status/transition storage across concrete state classes |
+| **Adapter** | `EmailNotificationSender` → `EmailGateway` (implemented by `LoggingEmailGateway`) | Converts a notification into an email (address, subject, body); a real SMTP/SendGrid gateway replaces the simulated one without touching any other class |
+| **Template method** | `AbstractIncidentState` | Default “refuse” behaviour for every action plus a guarded `moveTo`; concrete states override only what they allow |
 | **DTO / Mapper** | Request/response records + `IncidentMapper` | Keeps entities out of API contracts and hides internal fields |
 
 Other OOP concepts:

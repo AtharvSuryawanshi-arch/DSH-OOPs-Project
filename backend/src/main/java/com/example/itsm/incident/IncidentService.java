@@ -83,6 +83,7 @@ public class IncidentService {
     private final AuditService auditService;
     private final SettingsService settingsService;
     private final ApplicationEventPublisher eventPublisher;
+    private final IncidentAccessPolicy accessPolicy;
     private final Clock clock;
 
     public IncidentService(
@@ -103,8 +104,10 @@ public class IncidentService {
             AuditService auditService,
             SettingsService settingsService,
             ApplicationEventPublisher eventPublisher,
+            IncidentAccessPolicy accessPolicy,
             Clock clock
     ) {
+        this.accessPolicy = accessPolicy;
         this.incidentRepository = incidentRepository;
         this.commentRepository = commentRepository;
         this.mapper = mapper;
@@ -192,7 +195,7 @@ public class IncidentService {
                 "Incident created by " + reporter.getName() + " for " + service.getName() + "."
         );
 
-        workflowService.changeStatus(incident, IncidentStatus.CLASSIFIED);
+        workflowService.classify(incident);
         auditService.record(
                 incident,
                 null,
@@ -250,7 +253,9 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public PageResponse<IncidentResponse> search(IncidentQuery query) {
         UserPrincipal principal = currentUserService.requirePrincipal();
-        Long reporterScope = principal.role() == Role.EMPLOYEE ? principal.id() : null;
+        // Administrators see everything. Everyone else sees incidents they reported,
+        // and technicians also see incidents assigned to them.
+        Long reporterScope = principal.role() == Role.ADMIN ? null : principal.id();
         Long technicianScope = principal.role() == Role.TECHNICIAN ? principal.id() : null;
 
         Specification<Incident> specification = IncidentSpecifications.build(
@@ -346,15 +351,12 @@ public class IncidentService {
         User actor = currentUserService.requireUser();
         requireAssignedTechnician(incident, actor);
 
-        workflowService.validate(incident, IncidentStatus.ACKNOWLEDGED);
-        Instant now = clock.instant();
-        boolean breached = incident.isResponseBreached()
-                || (incident.getResponseDueAt() != null && now.isAfter(incident.getResponseDueAt()));
-        boolean newlyBreached = breached && !incident.isResponseBreached();
-
         IncidentStatus from = incident.getStatus();
-        incident.acknowledge(now, breached);
-        workflowService.changeStatus(incident, IncidentStatus.ACKNOWLEDGED);
+        boolean wasBreached = incident.isResponseBreached();
+        // The current state decides: only AssignedState accepts this, and it records the response time.
+        workflowService.acknowledge(incident, clock.instant());
+        boolean breached = incident.isResponseBreached();
+        boolean newlyBreached = breached && !wasBreached;
         auditService.record(
                 incident,
                 actor,
@@ -390,7 +392,7 @@ public class IncidentService {
         requireAssignedTechnician(incident, actor);
 
         IncidentStatus from = incident.getStatus();
-        workflowService.changeStatus(incident, IncidentStatus.IN_PROGRESS);
+        workflowService.start(incident);
         auditService.record(
                 incident,
                 actor,
@@ -414,15 +416,11 @@ public class IncidentService {
         User actor = currentUserService.requireUser();
         requireAssignedTechnician(incident, actor);
 
-        workflowService.validate(incident, IncidentStatus.RESOLVED);
-        Instant now = clock.instant();
-        boolean breached = incident.isResolutionBreached()
-                || (incident.getResolutionDueAt() != null && now.isAfter(incident.getResolutionDueAt()));
-        boolean newlyBreached = breached && !incident.isResolutionBreached();
-
         IncidentStatus from = incident.getStatus();
-        incident.resolve(request.resolutionNotes().trim(), now, breached);
-        workflowService.changeStatus(incident, IncidentStatus.RESOLVED);
+        boolean wasBreached = incident.isResolutionBreached();
+        // Only InProgressState accepts this; it stores the notes and checks the resolution target.
+        workflowService.resolve(incident, request.resolutionNotes().trim(), clock.instant());
+        boolean newlyBreached = incident.isResolutionBreached() && !wasBreached;
         auditService.record(
                 incident,
                 actor,
@@ -457,12 +455,9 @@ public class IncidentService {
         User actor = currentUserService.requireUser();
         requireReporter(incident, actor);
 
-        if (incident.getStatus() != IncidentStatus.RESOLVED) {
-            throw new BusinessRuleException("INCIDENT_NOT_RESOLVED", "Only a resolved incident can be verified.");
-        }
-
         IncidentStatus from = incident.getStatus();
-        workflowService.changeStatus(incident, IncidentStatus.VERIFIED);
+        // Only ResolvedState accepts verify; any other state refuses with a 409.
+        workflowService.verify(incident);
         auditService.record(
                 incident,
                 actor,
@@ -486,16 +481,9 @@ public class IncidentService {
         User actor = currentUserService.requireUser();
         requireAdmin(currentUserService.requirePrincipal());
 
-        if (incident.getStatus() != IncidentStatus.VERIFIED) {
-            throw new BusinessRuleException(
-                    "INCIDENT_NOT_VERIFIED",
-                    "An incident must be verified by the reporter before it can be closed."
-            );
-        }
-
         IncidentStatus from = incident.getStatus();
-        incident.close(request == null ? null : request.closureNotes(), clock.instant());
-        workflowService.changeStatus(incident, IncidentStatus.CLOSED);
+        // Only VerifiedState accepts close, so the reporter must have confirmed the fix first.
+        workflowService.close(incident, request == null ? null : request.closureNotes(), clock.instant());
         auditService.record(
                 incident,
                 actor,
@@ -521,15 +509,9 @@ public class IncidentService {
         if (!isReporter(incident, actor.getId()) && actor.getRole() != Role.ADMIN) {
             throw new AccessDeniedException("Only the reporter or an administrator can reopen an incident.");
         }
-        if (incident.getStatus() != IncidentStatus.RESOLVED) {
-            throw new BusinessRuleException("INCIDENT_NOT_REOPENABLE", "Only a resolved incident can be reopened.");
-        }
-
-        boolean breached = incident.getResolutionDueAt() != null
-                && clock.instant().isAfter(incident.getResolutionDueAt());
         IncidentStatus from = incident.getStatus();
-        incident.reopen(breached);
-        workflowService.changeStatus(incident, IncidentStatus.IN_PROGRESS);
+        // Only ResolvedState accepts reopen; it sends the incident back to IN_PROGRESS.
+        workflowService.reopen(incident, clock.instant());
         auditService.record(
                 incident,
                 actor,
@@ -554,8 +536,8 @@ public class IncidentService {
         requireAdmin(currentUserService.requirePrincipal());
 
         IncidentStatus from = incident.getStatus();
-        workflowService.changeStatus(incident, IncidentStatus.CANCELLED);
-        incident.close(request.reason().trim(), clock.instant());
+        // States before investigation accept cancel; IN_PROGRESS and later refuse it.
+        workflowService.cancel(incident, request.reason().trim(), clock.instant());
         auditService.record(
                 incident,
                 actor,
@@ -639,17 +621,11 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public List<DuplicateResponse> duplicates(Long id) {
         Incident incident = load(id);
-        requireView(incident, currentUserService.requirePrincipal());
+        UserPrincipal viewer = currentUserService.requirePrincipal();
+        requireView(incident, viewer);
+        // Matches the viewer may not open are listed without their title (see IncidentAccessPolicy).
         return duplicateDetectionService.findMatchesFor(id).stream()
-                .map(match -> new DuplicateResponse(
-                        match.incident().getId(),
-                        match.incident().getReference(),
-                        match.incident().getTitle(),
-                        match.incident().getStatus().name(),
-                        match.incident().getPriority().name(),
-                        match.score(),
-                        match.incident().getCreatedAt()
-                ))
+                .map(match -> DuplicateResponse.of(match, accessPolicy.canView(match.incident(), viewer)))
                 .toList();
     }
 
@@ -761,18 +737,9 @@ public class IncidentService {
     }
 
     private void requireView(Incident incident, UserPrincipal principal) {
-        if (principal.role() == Role.ADMIN) {
-            return;
+        if (!accessPolicy.canView(incident, principal)) {
+            throw new AccessDeniedException("You do not have access to this incident.");
         }
-        if (principal.role() == Role.EMPLOYEE && isReporter(incident, principal.id())) {
-            return;
-        }
-        if (principal.role() == Role.TECHNICIAN
-                && incident.getAssignedTechnician() != null
-                && incident.getAssignedTechnician().getId().equals(principal.id())) {
-            return;
-        }
-        throw new AccessDeniedException("You do not have access to this incident.");
     }
 
     private void requireReporterOrAdmin(Incident incident, UserPrincipal principal) {

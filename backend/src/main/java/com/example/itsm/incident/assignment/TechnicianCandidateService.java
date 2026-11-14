@@ -21,10 +21,17 @@ public class TechnicianCandidateService {
         this.incidentRepository = incidentRepository;
     }
 
+    /**
+     * Every assignment strategy and the recommendation list choose from these candidates.
+     * The incident's reporter is left out, so a technician who reports an incident
+     * is never assigned to fix (and then verify) their own problem.
+     */
     @Transactional(readOnly = true)
     public List<AssignmentCandidate> candidatesFor(Incident incident) {
         List<Technician> technicians = userRepository.findActiveTechniciansWithSkills();
+        Long reporterId = incident.getReporter().getId();
         return technicians.stream()
+                .filter(technician -> !technician.getId().equals(reporterId))
                 .map(technician -> {
                     long active = incidentRepository.countByAssignedTechnicianIdAndStatusIn(
                             technician.getId(),

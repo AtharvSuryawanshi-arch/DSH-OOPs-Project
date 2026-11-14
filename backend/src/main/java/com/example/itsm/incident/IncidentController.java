@@ -46,7 +46,8 @@ public class IncidentController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'ADMIN')")
+    // Any signed-in user can report an incident with their own account.
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TECHNICIAN', 'ADMIN')")
     public IncidentResponse create(@Valid @RequestBody CreateIncidentRequest request) {
         return incidentService.create(request);
     }
@@ -120,8 +121,9 @@ public class IncidentController {
         return incidentService.resolve(id, request);
     }
 
+    // Open to every role here; IncidentService.verify only lets the incident's reporter through.
     @PostMapping("/{id}/verify")
-    @PreAuthorize("hasRole('EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TECHNICIAN', 'ADMIN')")
     public IncidentResponse verify(@PathVariable Long id) {
         return incidentService.verify(id);
     }
@@ -135,8 +137,9 @@ public class IncidentController {
         return incidentService.close(id, request);
     }
 
+    // IncidentService.reopen allows the reporter (any role) or an administrator.
     @PostMapping("/{id}/reopen")
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TECHNICIAN', 'ADMIN')")
     public IncidentResponse reopen(@PathVariable Long id) {
         return incidentService.reopen(id);
     }
@@ -147,8 +150,9 @@ public class IncidentController {
         return incidentService.cancel(id, request);
     }
 
+    // IncidentService.feedback only lets the incident's reporter through.
     @PostMapping("/{id}/feedback")
-    @PreAuthorize("hasRole('EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TECHNICIAN', 'ADMIN')")
     public IncidentResponse feedback(@PathVariable Long id, @Valid @RequestBody FeedbackRequest request) {
         return incidentService.feedback(id, request);
     }

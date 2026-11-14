@@ -1,163 +1,186 @@
 # Demo and video plan (15–20 minutes)
 
-This script is designed for the project demonstration video. It covers the three required workflows,
-shows each role, and explains the OOP design and intelligent features while the application is on
-screen. Adjust the timing to the group size; every member should introduce themselves and explain at
-least one module.
+**Concept: "One outage, start to finish."** Instead of touring features, the video follows the
+brief's own scenario, *the payment application is down*, through all three required workflows. Each
+design pattern is explained at the moment it does its job, and we deliberately try to break the rules
+on camera. Every member introduces themselves and presents the part they built.
 
 ## Before recording
 
 ```bash
-# From a clean checkout
-docker compose down -v            # only if you want a fresh seeded database
+docker compose down -v            # fresh, seeded database (removes test data)
 docker compose up -d --wait db
 cd backend && ./mvnw spring-boot:run
 # another terminal
 cd frontend && npm run dev
 ```
 
-Open <http://localhost:5173> and keep a second browser profile or incognito window ready for switching
-roles. The seeder creates a rich dataset (13 incidents, 4 technicians, SLA breaches, a duplicate pair,
-an at-risk incident and notifications) automatically.
+On Windows, if the backend fails with "Unable to establish loopback connection", start it from
+PowerShell with a different socket folder:
 
-Demo accounts:
+```powershell
+$env:JAVA_TOOL_OPTIONS = "-Djdk.net.unixdomain.tmpdir=$env:LOCALAPPDATA\JavaSockets"; New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\JavaSockets" | Out-Null; cd backend; .\mvnw.cmd spring-boot:run
+```
 
-- Admin: `admin@itsm.local` / `Admin@123`
-- Technician: `priya@itsm.local` / `Tech@123` (also `rohan@itsm.local`, `dev@itsm.local`)
-- Employee: `employee@itsm.local` / `Employee@123` (also `vikram@itsm.local`)
+Open <http://localhost:5173> in **two browser windows side by side** (one normal, one private/incognito
+so they can be signed in as different people). The dashboard, incident page and "Waiting on you" panel
+refresh themselves every 10–15 seconds, so a step taken in one window appears in the other without
+pressing Refresh.
 
-Reset after the demo with `docker compose down -v` if you need a clean run.
+Demo accounts (public, seeded):
 
-## Suggested timing
+| Who | Login | Password |
+| --- | --- | --- |
+| Neha Sharma, employee | `employee@itsm.local` | `Employee@123` |
+| Vikram Rao, employee | `vikram@itsm.local` | `Employee@123` |
+| Priya Nair, technician (application, database, cloud) | `priya@itsm.local` | `Tech@123` |
+| Rohan / Dev / Sara, technicians | `rohan@` / `dev@` / `sara@itsm.local` | `Tech@123` |
+| Aarav Mehta, service manager | `admin@itsm.local` | `Admin@123` |
 
-| Time | Segment | Presenter | What is shown |
+Choose light or dark mode with the **Dark mode** switch at the bottom of the sidebar before you start,
+and use the same mode for the whole recording.
+
+## Running order
+
+| Time | Segment | Presenter | What is on screen |
 | --- | --- | --- | --- |
-| 0:00–1:30 | Introduction | All | Team names, problem statement, stack, architecture in one slide |
-| 1:30–4:00 | Login + role-based experience | Member 1 (UI) | Login, admin dashboard, role differences, responsive layout |
-| 4:00–7:30 | Workflow 1 — report to assignment | Member 2 (Backend/domain) | Employee reports P1 payment incident; auto classification, priority rationale, SLA, duplicate detection, auto-assignment, notifications |
-| 7:30–11:00 | Workflow 2 — investigation to closure | Member 3 (Technician/domain) | Technician queue, acknowledge, start, internal note, resolve, reporter verify, admin close, feedback, audit timeline |
-| 11:00–13:30 | Workflow 3 — correlation, SLA and escalation | Member 2/4 | Duplicate link, at-risk/breached SLA, escalation, admin reports, workload and service analysis |
-| 13:30–16:30 | Administration and OOP design | Member 4/5 | Users/skills, services/categories, SLA policies, assignment strategy switch, audit; state/strategy/observer explanation |
-| 16:30–18:30 | Testing and security | Member 5 | `mvnw test`/Testcontainers, lint/build, RBAC/401/403, invalid transition, validation |
-| 18:30–20:00 | Summary and future work | All | Requirements coverage, limitations, future work, thank you |
+| 0:00 | Cold open | Narrator | The finished audit trail of the outage (record it at the end, show it first) |
+| 0:45 | Team | All | Each member: name + the module they built |
+| 1:45 | Act 1: Report (Workflow 1) | Member 2 | Neha reports the outage; triage; assignment; strategy switch |
+| 5:00 | Act 2: Fix (Workflow 2) | Member 3 | Split screen Priya / Neha; "break it"; still broken → fixed → confirmed → closed |
+| 10:00 | Act 3: Storm (Workflow 3) | Member 4 | Several reports; duplicates; SLA risk; escalation; dashboard and reports |
+| 13:00 | Under the hood | Member 1 / 5 | Architecture, then each pattern as "where you just saw it" |
+| 16:00 | Proof | Member 5 | Test run (44 passing), security checks |
+| 17:30 | Close | All | MVP checklist, limitations, next steps |
 
-## Workflow 1 — Employee report → triage → assignment (about 3.5 minutes)
+## Cold open (45 seconds)
 
-1. Sign in as **employee@itsm.local / Employee@123**.
-2. On the employee dashboard, point out the scoped KPIs and recent incidents.
-3. Click **Report an incident**.
-4. Fill:
-   - Title: “Payment application unavailable after deployment”
-   - Description: “Customers cannot complete card payments. The gateway returns 503 and checkout
-     requests time out.”
-   - Affected service: **Payment Gateway**
-   - Impact: **Extreme**, Urgency: **Critical**, Affected users: **650**
-5. Click **Analyze this report**. Show:
-   - auto-classification **Application** with confidence and rationale;
-   - possible duplicate list (the seeded payment incident(s)).
-6. Click **Create incident**. On the detail page, explain:
-   - reference `INC-...`, P1 priority and stored rationale/score;
-   - response target 2 minutes and resolution target 15 minutes (payment-specific SLA), and why the
-     service override beats the global P1 policy;
-   - auto-assignment to the best technician (skill/load/experience);
-   - assignment/created notifications;
-   - the duplicate warning if the report matched.
-7. Switch to **admin@itsm.local** and open the notification bell / inbox to show the in-app and
-   simulated email records. Mention that both channels are stored; email is simulated and logged.
+Show the **Audit trail** tab of the finished outage incident, scrolling from "created" to "closed".
+Line to say: *"Every line on this screen is going to happen in front of you in the next fifteen
+minutes."* Then cut to Neha's home screen.
 
-## Workflow 2 — Technician investigation → resolution → verification → closure (about 3.5 minutes)
+## Act 1: Report → triage → assignment (Workflow 1, about 3 minutes)
 
-Use a seeded assigned incident if you do not want to mutate the new P1 (e.g. the cloud-storage
-incident) or create a fresh one with auto-assign enabled.
+1. Sign in as **Neha** (`employee@itsm.local`). Her **Home** shows *her* requests only: "Waiting on
+   you", "Being worked on" with a progress bar, and "Recently fixed". Point out that an employee does
+   not see operational statistics.
+2. Click **New incident** (top bar). Fill in:
+   - Title: "Payment application unavailable after deployment"
+   - Description: "Customers cannot complete card payments. The gateway returns 503 and checkout
+     requests time out."
+   - Service: **Payment Gateway**; Impact **Extreme**; Urgency **Critical**; People affected **650**.
+3. Click **Analyze this report**: category **Application** with confidence, and the seeded payment
+   incidents listed as possible duplicates.
+4. Click **Create incident**. On the incident page show:
+   - the **Progress** tracker (Reported → Assigned → Working on it → Fixed → Confirmed → Closed);
+   - P1 with the stored formula ("Impact × Urgency × Criticality + affected-users bonus");
+   - the payment-specific SLA (tighter than the global P1 policy);
+   - auto-assignment to **Priya** (skill match: application).
+5. **"Why Priya?"** Switch to the code: `AssignmentStrategy` interface and its three implementations
+   (`SkillBasedAssignmentStrategy`, `LoadBasedAssignmentStrategy`, `RoundRobinAssignmentStrategy`).
+   *"The incident code never changes: it asks the configured strategy."*
+6. In the admin window: **Assignment settings** → switch to **Load-based**. Sign in as **Vikram** and
+   report a second payment problem: it goes to the least busy technician instead. Switch back to
+   Skill-based afterwards. (Rehearse this: who wins load-based depends on the current workload.)
+7. Open the **notification bell** as Priya: in-app notification; mention the simulated email channel.
 
-1. Sign in as the assigned technician (use the technician shown on the incident).
-2. Open **My queue**; show capacity utilisation, SLA deadlines and the incident list.
-3. Open an **Assigned** incident.
-4. Click **Acknowledge**. Point out the response timestamp and any response-breach warning.
-5. Click **Start investigation**.
-6. Add an **internal note** (visible only to technicians/admins). Explain that employees cannot see it.
-7. Add a public comment.
-8. Click **Resolve incident**, enter resolution notes, and confirm them.
-9. Switch to the reporter (employee). Open the incident, show the resolution notes, click **Verify
-   resolution**, and optionally leave feedback (1–5 stars + comment).
-10. Switch to the admin. Open the verified incident and click **Close incident**, add a closure note.
-11. Open the **Audit trail** tab and scroll: created → classified → priority → assigned → acknowledged
-    → started → comments → resolved → verified → closed → feedback. Each entry has actor, time and
-    state change.
-12. Open **Notifications** as the technician/reporter to show assignment, status and resolution
-    notifications across both channels.
+## Act 2: Investigate → resolve → verify → close (Workflow 2, about 5 minutes)
 
-## Workflow 3 — Correlation, SLA risk, escalation and reporting (about 2.5 minutes)
+Left window: **Priya**. Right window: **Neha** on her Home screen.
 
-1. Return to the admin dashboard. Show:
-   - P1/open/SLA-breach KPI cards;
-   - seven-day created vs resolved trend;
-   - priority mix;
-   - SLA watch list;
-   - technician workload against capacity.
-2. Open the seeded payment incident with breached response/resolution SLAs.
-3. Show the **duplicate/related incident** panel and open the linked report. Explain the similarity
-   score and the self-reference in the database.
-4. Show the **SLA clock** and warning/breach note. If the monitor has run, the escalation banner shows
-   level 1/2/3 for an unacknowledged critical incident. Run **SLA scan** from the Reports/SLA page to
-   demonstrate deterministic/idempotent monitoring.
-5. Open **Reports**:
-   - service analysis (Payment Gateway/Cloud/Email…);
-   - category analysis;
-   - technician workload table;
-   - average response/resolution and breached count.
-6. Open **Audit trail** in administration and show system-generated escalation/SLA entries.
+1. Priya opens the incident and clicks **Acknowledge**. Within seconds Neha's progress bar moves to
+   "Working on it". *"Two people, two windows, one incident."*
+2. **Try to break it (state rules).** The UI only offers valid buttons, so call the API directly
+   (terminal on screen):
 
-## Administration and design segment (about 3 minutes)
+   ```bash
+   API=http://localhost:8080/api
+   TECH=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' \
+     -d '{"email":"priya@itsm.local","password":"Tech@123"}' | jq -r .token)
+   ID=<incident id from the URL>
+   # Resolve before starting work → 409 "You cannot resolve an incident that is Acknowledged."
+   curl -s -X POST $API/incidents/$ID/resolve -H "Authorization: Bearer $TECH" \
+     -H 'Content-Type: application/json' -d '{"resolutionNotes":"too early"}' | jq .detail
+   ```
 
-1. **Users & skills**: show the user table, role badges, technician skills/capacity. Add a technician
-   with a skill (or edit one) and explain the user inheritance model. Demonstrate the self-
-   deactivation guard or the active-incident deactivation guard.
-2. **Services & categories**: show business criticality and active flags. Explain how a new category
-   automatically becomes available to the classifier.
-3. **SLA policies**: show global P1–P4 plus the payment-specific P1 override. Open the add-policy
-   modal; mention validation (resolution > response).
-4. **Assignment settings**: switch from Skill-based to Load-based (and back), explain how the
-   candidate scoring works and that the change applies to future classifications without redeploying.
-5. **Object-oriented design** (talk over the architecture slide or the code):
-   - State pattern for the lifecycle and why illegal transitions are rejected;
-   - Strategy pattern for priority and assignment;
-   - Observer/domain events for notifications and audit;
-   - Factory/repository patterns and the user inheritance hierarchy;
-   - composition of comments/audit into incidents and optimistic locking.
+   Switch to `AcknowledgedState.java`: it only implements `start()` (and reassign / cancel); every
+   other action falls through to `AbstractIncidentState`, which refuses it. *"There is no if-statement
+   about status anywhere in the service. The state object decides."*
+3. Priya clicks **Start investigation**, adds an **internal note** (employees cannot see it) and a
+   public comment, then **Resolve incident** with notes.
+4. Neha's Home shows **"Waiting on you"**: *"Priya says this is fixed… Is it working for you now?"*
+   Neha clicks **No, still broken**. The tracker goes back to *Working on it* and Priya's window
+   updates. Show `ResolvedState.reopen()`.
+5. **Try to break it (permissions).** As the admin, try to confirm Neha's fix through the API:
 
-## Testing and security segment (about 2 minutes)
+   ```bash
+   ADMIN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' \
+     -d '{"email":"admin@itsm.local","password":"Admin@123"}' | jq -r .token)
+   curl -s -X POST $API/incidents/$ID/verify -H "Authorization: Bearer $ADMIN" | jq .detail
+   # → 403 "Only the reporter can perform this action."
+   ```
 
-1. Run `cd backend && ./mvnw test`; mention 33 unit tests + 1 full-stack Testcontainers integration
-   test against a disposable PostgreSQL container.
-2. Run `cd frontend && npm run lint && npm run build`; show a clean build.
-3. In the browser or terminal, demonstrate:
-   - unauthenticated request → 401;
-   - employee calling `/api/admin/users` → 403;
-   - technician accessing an unassigned incident → 403;
-   - invalid transition (assigned → resolved) → 409;
-   - blank title → 400 with field errors;
-   - unknown endpoint → 404 ProblemDetail.
-4. Briefly explain BCrypt, JWT expiry and the internal-note filtering.
+   *"Even the IT manager cannot confirm someone else's fix. Role checks on the endpoint answer 'what
+   kind of user are you?'; the service answers 'is this incident yours?'."*
+6. Priya resolves again. Neha clicks **Yes, it's fixed** → *Confirmed*. The admin opens the incident
+   and clicks **Close incident**. Neha leaves a 5-star rating with **Rate the fix**.
+7. Open the **Audit trail** tab: every step with actor, time, previous and new state. This is the
+   screen from the cold open.
 
-## Closing (about 1.5 minutes)
+## Act 3: The storm — duplicates, SLA risk, escalation (Workflow 3, about 3 minutes)
 
-- Restate the three workflows and how the MVP requirements are met.
-- Highlight the innovation features: auto-classification, duplicate detection, smart recommendations,
-  SLA risk/escalation, suggested resolutions.
-- Mention limitations honestly: simulated email, no refresh tokens/rate limiting, in-process monitor,
-  single tenant.
-- Summarise future work (outbox/real providers, real-time notifications, MFA, analytics at scale,
-  dependency graph, CI/CD).
+1. In quick succession, report two more payment problems as Vikram and as Rohan (a technician can
+   report too, and is never assigned his own incident). The **Possible duplicate** panel links them
+   with a similarity score.
+2. Admin **Dashboard**: open/critical/breach cards, created-vs-resolved trend, priority mix, the
+   **SLA watch** list and technician workload against capacity.
+3. Open the seeded breached payment incident: SLA clock, breach note, escalation banner.
+4. **Reports** → **Run SLA scan**: warnings, breaches and escalations are applied idempotently (run it
+   twice; nothing is duplicated). Show service, category and technician analysis.
+
+## Under the hood (about 3 minutes)
+
+One architecture slide (`docs/ARCHITECTURE.md`, section 3), then each pattern tied to a moment already
+shown:
+
+| Pattern | Where the viewer saw it | File to show |
+| --- | --- | --- |
+| State | Resolve-too-early refused; "still broken" went back a step | `incident/lifecycle/ResolvedState.java`, `AbstractIncidentState.java` |
+| Strategy | Switching skill-based → load-based changed who got the incident | `incident/assignment/AssignmentStrategy.java` |
+| Observer | One status change produced in-app + email notifications and audit | `notification/NotificationEventListener.java` |
+| Strategy + Adapter (notifications) | The same message arrived in the bell and as a (simulated) email | `NotificationSender.java`, `NotificationDispatcher.java`, `EmailNotificationSender.java` → `EmailGateway.java` |
+| Factory | Users, notifications, strategies and states are created in one place | `UserFactory`, `IncidentStateFactory` |
+| Inheritance | Employee / Technician / Administrator are real "is-a" users | `user/User.java` |
+| Repository | No SQL in services | `incident/IncidentRepository.java` |
+
+Mention polymorphism in one sentence: the same `assign()` call assigns from *Classified* but only
+reassigns from *Assigned* or *In progress* (`ClassifiedState` vs `AssignedState`).
+
+## Proof: tests and security (about 1.5 minutes)
+
+```bash
+cd backend && ./mvnw test        # 44 tests: 40 unit + 4 full-stack integration (real PostgreSQL)
+cd frontend && npm run lint && npm run build
+```
+
+Name two tests on screen: `IncidentLifecycleTest.eachStateDecidesWhatAnActionDoes` and
+`ItsmWorkflowIntegrationTest.technicianCanReportOwnIncidentButIsNeverAssignedToIt`. Mention the 60+
+documented cases in `docs/TEST_CASES.md`.
+
+## Close (about 1.5 minutes)
+
+- Show the brief's MVP list with each item ticked (users, incident management, priority, two+
+  assignment strategies, SLA, two notification channels, audit, five+ filters, intelligent features,
+  persistence).
+- Honest limitations: simulated email, in-process SLA monitor, no refresh tokens or rate limiting.
+- Next steps: real email/SMS adapters, auto-close of unconfirmed fixes, real-time push.
 
 ## Recording tips
 
-- Use two browser windows side by side (employee and technician) for hand-offs; keep the URL bar
-  visible to show the role switch.
-- Zoom the browser to 90–100% at 1080p; hide unrelated tabs and notifications.
-- Prepare the demo data before recording; leave the dashboard animations ~1.5 seconds before
-  screenshots so charts are fully drawn.
-- Do not show the terminal output of real secrets; the demo credentials are intentionally public.
-- Keep each workflow under 4 minutes and rehearse the role switches.
-- Name the final file according to the course instruction, e.g.
-  `1_OOP_S1_2025-2026_Project.mp4`.
+- Record each act separately and join them; rehearse the window switches.
+- 1080p, browser zoom 90–100%, cursor highlighting on, unrelated tabs and notifications hidden.
+- Reset the database before the final take (`docker compose down -v`), since test runs leave incidents
+  behind.
+- Keep the demo credentials on screen only as shown above; never show real secrets.
+- Name the file as the course instructs, e.g. `1_OOP_S1_2026-2027_Project.mp4`, and upload before
+  **22 Nov 2026**.

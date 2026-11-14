@@ -17,14 +17,33 @@ public final class IncidentSpecifications {
     private IncidentSpecifications() {
     }
 
+    /**
+     * Builds the search filter.
+     *
+     * @param visibleAsReporterId   if set, the caller may see incidents they reported
+     * @param visibleAsTechnicianId if set, the caller may see incidents assigned to them
+     *                              (when both are set, either one is enough; when neither is set
+     *                              there is no visibility restriction, e.g. for administrators)
+     */
     public static Specification<Incident> build(
             IncidentQuery query,
-            Long effectiveReporterId,
-            Long effectiveTechnicianId,
+            Long visibleAsReporterId,
+            Long visibleAsTechnicianId,
             Instant now
     ) {
         return (root, criteriaQuery, builder) -> {
             List<Predicate> predicates = new ArrayList<>();
+
+            List<Predicate> visibility = new ArrayList<>();
+            if (visibleAsReporterId != null) {
+                visibility.add(builder.equal(root.get("reporter").get("id"), visibleAsReporterId));
+            }
+            if (visibleAsTechnicianId != null) {
+                visibility.add(builder.equal(root.get("assignedTechnician").get("id"), visibleAsTechnicianId));
+            }
+            if (!visibility.isEmpty()) {
+                predicates.add(builder.or(visibility.toArray(Predicate[]::new)));
+            }
 
             if (query.search() != null && !query.search().isBlank()) {
                 String pattern = "%" + query.search().trim().toLowerCase(Locale.ROOT) + "%";
@@ -48,14 +67,12 @@ public final class IncidentSpecifications {
                 predicates.add(builder.equal(root.get("service").get("id"), query.serviceId()));
             }
 
-            Long technicianId = effectiveTechnicianId != null ? effectiveTechnicianId : query.technicianId();
-            if (technicianId != null) {
-                predicates.add(builder.equal(root.get("assignedTechnician").get("id"), technicianId));
+            // Optional filters chosen by the user; they only narrow the visible set above.
+            if (query.technicianId() != null) {
+                predicates.add(builder.equal(root.get("assignedTechnician").get("id"), query.technicianId()));
             }
-
-            Long reporterId = effectiveReporterId != null ? effectiveReporterId : query.reporterId();
-            if (reporterId != null) {
-                predicates.add(builder.equal(root.get("reporter").get("id"), reporterId));
+            if (query.reporterId() != null) {
+                predicates.add(builder.equal(root.get("reporter").get("id"), query.reporterId()));
             }
 
             if (query.from() != null) {

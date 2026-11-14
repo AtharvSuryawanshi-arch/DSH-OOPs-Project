@@ -52,28 +52,28 @@ JWT claims include subject (email), user id, name and role. Tokens expire after
 
 ## Incidents
 
-Role scoping is automatic on `GET /incidents`: employees see only incidents they reported,
-technicians see only incidents assigned to them, admins see everything.
+Role scoping is automatic on `GET /incidents`: every user sees the incidents they reported,
+technicians also see incidents assigned to them, and admins see everything.
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `POST` | `/incidents` | Employee, Admin | Report an incident; classifies, prioritizes, attaches SLA, detects duplicates and optionally auto-assigns |
+| `POST` | `/incidents` | Any authenticated user | Report an incident; classifies, prioritizes, attaches SLA, detects duplicates and optionally auto-assigns (never to the reporter) |
 | `GET` | `/incidents` | Authenticated | Paginated, filtered, role-scoped queue |
 | `GET` | `/incidents/{id}` | Reporter / assigned technician / Admin | Full detail, comments and audit trail |
 | `PATCH` | `/incidents/{id}` | Reporter or Admin, before assignment | Edit title/description/impact/urgency/affected users and re-classify |
-| `POST` | `/incidents/{id}/assign` | Admin | Assign/reassign a technician |
+| `POST` | `/incidents/{id}/assign` | Admin | Assign/reassign a technician (not the incident's own reporter: 409 `SELF_ASSIGNMENT_NOT_ALLOWED`) |
 | `POST` | `/incidents/{id}/acknowledge` | Assigned technician | `ASSIGNED → ACKNOWLEDGED`; checks response SLA |
 | `POST` | `/incidents/{id}/start` | Assigned technician | `ACKNOWLEDGED → IN_PROGRESS` |
 | `POST` | `/incidents/{id}/resolve` | Assigned technician | `IN_PROGRESS → RESOLVED` with resolution notes |
-| `POST` | `/incidents/{id}/verify` | Reporter | `RESOLVED → VERIFIED` |
+| `POST` | `/incidents/{id}/verify` | Reporter (any role) | `RESOLVED → VERIFIED` |
 | `POST` | `/incidents/{id}/close` | Admin | `VERIFIED → CLOSED` with optional closure note |
-| `POST` | `/incidents/{id}/reopen` | Reporter or Admin | `RESOLVED → IN_PROGRESS` |
+| `POST` | `/incidents/{id}/reopen` | Reporter (any role) or Admin | `RESOLVED → IN_PROGRESS` |
 | `POST` | `/incidents/{id}/cancel` | Admin | Cancels early-lifecycle incidents with a reason |
-| `POST` | `/incidents/{id}/feedback` | Reporter | 1–5 rating + optional comment, once, after resolution |
+| `POST` | `/incidents/{id}/feedback` | Reporter (any role) | 1–5 rating + optional comment, once, after resolution |
 | `POST` | `/incidents/{id}/priority-override` | Admin | Override priority with reason and recalculate SLA |
 | `POST` | `/incidents/{id}/comments` | Authorized viewer | Public comment or internal note (internal = tech/admin only) |
 | `GET` | `/incidents/{id}/audit` | Authorized viewer | Chronological audit entries |
-| `GET` | `/incidents/{id}/duplicates` | Authorized viewer | Similar incidents with a match score |
+| `GET` | `/incidents/{id}/duplicates` | Authorized viewer | Similar incidents with a match score. Matches the caller may not open are returned with `accessible: false` and without `incidentId` or `title` |
 | `GET` | `/incidents/{id}/suggested-resolutions` | Authorized viewer | Similar resolved incidents and their resolution notes |
 | `GET` | `/incidents/{id}/recommended-technicians` | Authorized viewer | Ranked candidates with skill/load/experience scores |
 
@@ -105,8 +105,8 @@ enabled.
 | `priority` | `P1` | Priority |
 | `categoryId` | `8` | Category |
 | `serviceId` | `1` | Affected service |
-| `technicianId` | `2` | Technician (admin only; technicians are always scoped to self) |
-| `reporterId` | `6` | Reporter (admin only; employees are always scoped to self) |
+| `technicianId` | `2` | Technician (narrows the caller's visible incidents) |
+| `reporterId` | `6` | Reporter (narrows the caller's visible incidents) |
 | `slaStatus` | `AT_RISK` | `ON_TRACK`, `AT_RISK`, `BREACHED`, `MET` |
 | `from` / `to` | `2026-11-09T00:00:00Z` | Created-at date range (ISO-8601) |
 | `duplicatesOnly` | `true` | Incidents linked to a possible duplicate |
@@ -221,7 +221,7 @@ Example totals:
 ```
 
 Response includes `classification.categoryName`, `confidence`, `rationale`, and
-`possibleDuplicates[]` with match scores.
+`possibleDuplicates[]` with match scores (same `accessible` rule as `/incidents/{id}/duplicates`: other people's incidents appear without title).
 
 ## Admin
 

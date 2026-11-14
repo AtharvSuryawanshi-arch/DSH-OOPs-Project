@@ -57,6 +57,25 @@ public interface IncidentRepository extends JpaRepository<Incident, Long>, JpaSp
             @Param("excludeId") Long excludeId
     );
 
+    /**
+     * Candidates for duplicate detection, filtered in the database (status, age, not the incident
+     * itself) and capped by {@code pageable}; only the text similarity is computed in Java.
+     */
+    @EntityGraph(attributePaths = {"reporter", "service", "assignedTechnician"})
+    @Query("""
+            select i from Incident i
+            where i.status in :statuses
+              and i.createdAt > :since
+              and i.id <> :excludeId
+            order by i.createdAt desc
+            """)
+    List<Incident> findDuplicateCandidates(
+            @Param("statuses") Collection<IncidentStatus> statuses,
+            @Param("since") Instant since,
+            @Param("excludeId") Long excludeId,
+            Pageable pageable
+    );
+
     @Query(value = "select nextval('incident_reference_seq')", nativeQuery = true)
     long nextReferenceSequence();
 

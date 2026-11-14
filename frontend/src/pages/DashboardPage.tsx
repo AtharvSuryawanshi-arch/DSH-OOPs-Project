@@ -38,20 +38,17 @@ import {
   StatusBadge,
 } from '../components/ui'
 import { formatMinutes, greeting, timeAgo } from '../lib/format'
-
-const priorityColors: Record<Priority, string> = {
-  P1: '#dc2626',
-  P2: '#ea580c',
-  P3: '#2563eb',
-  P4: '#64748b',
-}
+import { useChartColors } from '../lib/theme'
+import { WaitingOnYou } from '../components/WaitingOnYou'
 
 const dateTick = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
 export function DashboardPage() {
   const { user } = useAuth()
-  const dashboard = useApi<DashboardResponse>('/dashboard')
-  const risk = useApi<PageResponse<Incident>>('/incidents?slaStatus=AT_RISK&size=4&escalatedOnly=false')
+  // Refresh quietly so a second window (another role) sees hand-offs without pressing Refresh.
+  const dashboard = useApi<DashboardResponse>('/dashboard', { pollMs: 15_000 })
+  const risk = useApi<PageResponse<Incident>>('/incidents?slaStatus=AT_RISK&size=4&escalatedOnly=false', { pollMs: 15_000 })
+  const colors = useChartColors()
 
   if (dashboard.loading && !dashboard.data) {
     return <PageLoader label="Loading service desk overview…" />
@@ -92,18 +89,16 @@ export function DashboardPage() {
             <button type="button" className="button button-ghost" onClick={dashboard.refetch}>
               <RefreshCw size={16} /> Refresh
             </button>
-            {user?.role === 'TECHNICIAN' ? (
+            {user?.role === 'TECHNICIAN' && (
               <Link to="/my-work" className="button button-primary">
                 <Wrench size={16} /> Open my queue
-              </Link>
-            ) : (
-              <Link to="/incidents/new" className="button button-primary">
-                <Ticket size={16} /> Report an incident
               </Link>
             )}
           </>
         }
       />
+
+      <WaitingOnYou />
 
       <div className="stat-grid">
         <StatCard
@@ -148,29 +143,29 @@ export function DashboardPage() {
               <AreaChart data={data.trend} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="createdFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.28} />
-                    <stop offset="100%" stopColor="#4f46e5" stopOpacity={0} />
+                    <stop offset="0%" stopColor={colors.created} stopOpacity={0.28} />
+                    <stop offset="100%" stopColor={colors.created} stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="resolvedFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.22} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor={colors.resolved} stopOpacity={0.22} />
+                    <stop offset="100%" stopColor={colors.resolved} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="4 4" stroke="#e7eaf0" vertical={false} />
+                <CartesianGrid strokeDasharray="4 4" stroke={colors.grid} vertical={false} />
                 <XAxis
                   dataKey="date"
                   tickFormatter={(value: string) => dateTick.format(new Date(`${value}T00:00:00Z`))}
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 11, fill: '#8a90a2' }}
+                  tick={{ fontSize: 11, fill: colors.axis }}
                 />
-                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#8a90a2' }} />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: colors.axis }} />
                 <Tooltip
-                  contentStyle={{ borderRadius: 12, border: '1px solid #e7eaf0', fontSize: 12 }}
+                  contentStyle={{ borderRadius: 12, border: `1px solid ${colors.tooltip.border}`, background: colors.tooltip.background, color: colors.tooltip.color, fontSize: 12 }}
                   labelFormatter={(value) => dateTick.format(new Date(`${value}T00:00:00Z`))}
                 />
-                <Area type="monotone" dataKey="created" name="Created" stroke="#4f46e5" strokeWidth={2} fill="url(#createdFill)" />
-                <Area type="monotone" dataKey="resolved" name="Resolved" stroke="#10b981" strokeWidth={2} fill="url(#resolvedFill)" />
+                <Area type="monotone" dataKey="created" name="Created" stroke={colors.created} strokeWidth={2} fill="url(#createdFill)" />
+                <Area type="monotone" dataKey="resolved" name="Resolved" stroke={colors.resolved} strokeWidth={2} fill="url(#resolvedFill)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -191,17 +186,17 @@ export function DashboardPage() {
                   stroke="none"
                 >
                   {priorityData.map((entry) => (
-                    <Cell key={entry.name} fill={priorityColors[entry.name as Priority]} />
+                    <Cell key={entry.name} fill={colors.priority[entry.name as Priority]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e7eaf0', fontSize: 12 }} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${colors.tooltip.border}`, background: colors.tooltip.background, color: colors.tooltip.color, fontSize: 12 }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
           <ul className="legend-list">
             {priorityData.map((item) => (
               <li key={item.name}>
-                <span className="legend-dot" style={{ background: priorityColors[item.name as Priority] }} />
+                <span className="legend-dot" style={{ background: colors.priority[item.name as Priority] }} />
                 <span>{item.label}</span>
                 <strong>{item.value}</strong>
               </li>

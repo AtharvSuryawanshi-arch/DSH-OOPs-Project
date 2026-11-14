@@ -25,12 +25,12 @@ The Testcontainers test requires a working Docker daemon; it starts a disposable
 
 ## 2. Automated test inventory
 
-**Result: 34 tests run, 34 passed, 0 failures** (33 unit tests + 1 full-stack integration test).
+**Result: 44 tests run, 44 passed, 0 failures** (40 unit tests + 4 full-stack integration tests).
 
 | Test class | Tests | Covers |
 | --- | --- | --- |
 | `WeightedPriorityStrategyTest` | 4 | Formula, P1/P2/P3/P4 bands, affected-user bonus, rationale |
-| `IncidentLifecycleTest` | 5 | State transitions allowed/denied, closed/cancelled terminal states, invalid transition exception |
+| `IncidentLifecycleTest` | 6 | State transitions allowed/denied, closed/cancelled terminal states, invalid transition exception, each state performing or refusing actions (assign vs reassign, verify, reopen, cancel after work started) |
 | `AssignmentStrategyTest` | 4 | Skill-based, load-based, round-robin, capacity/unavailable filtering |
 | `CategorizationServiceTest` | 3 | Network/auth classification, low-confidence fallback |
 | `TextSimilarityTest` | 4 | Identical/unrelated text, overlap coefficient, empty input |
@@ -38,7 +38,9 @@ The Testcontainers test requires a working Docker daemon; it starts a disposable
 | `SlaStatusResolverTest` | 5 | On track, at risk, response breach, met, late resolution |
 | `JwtServiceTest` | 2 | Token identity/validation, tampered token rejection |
 | `IncidentDomainTest` | 4 | Acknowledge, resolve, feedback, duplicate link |
-| `ItsmWorkflowIntegrationTest` | 1 | Real PostgreSQL + HTTP API: login, create, auto-classify, auto-assign, ack, start, resolve, verify, close, feedback, role guard, invalid transition |
+| `IncidentAccessPolicyTest` | 4 | Admin sees all; reporter sees own whatever the role; technician sees only assigned; other employees see nothing |
+| `NotificationChannelsTest` | 2 | Every message goes through every registered channel (inactive users skipped); the email adapter builds address/subject/body for the gateway and keeps a copy |
+| `ItsmWorkflowIntegrationTest` | 4 | Real PostgreSQL + HTTP API: login, create, auto-classify, auto-assign, ack, start, resolve, verify, close, feedback, role guard, invalid transition; technician- and admin-reported incidents, reporter-only verify/feedback/reopen, no self-assignment; duplicate warnings hide incidents the viewer may not open |
 
 ## 3. Manual API/UI validation performed
 
@@ -78,6 +80,10 @@ invariant enforced in design.
 | TC-AUTH-08 | Internal note visibility | Technician created an internal note | Employee opens detail; admin opens detail | Employee response excludes the note; admin/assigned technician sees it | Pass (M) |
 | TC-AUTH-09 | Tampered JWT | Any valid token | Change last characters of token; call protected API | 401; token rejected | Pass (A/M) |
 | TC-AUTH-10 | Self-deactivation guard | Admin token | PATCH own user with `active:false` | 409 `CANNOT_DEACTIVATE_SELF` | Pass (M) |
+| TC-AUTH-12 | Technician reports an incident | Technician token | POST `/api/incidents`, then GET it and list incidents | 201; auto-assigned to another technician; reporter can open it and sees it in the list | Pass (A) |
+| TC-AUTH-13 | Only the reporter verifies | RESOLVED incident reported by a technician | POST `/verify` as another employee, the assigned technician and an admin; then as the reporter | 403, 403, 403; reporter gets 200 VERIFIED | Pass (A) |
+| TC-AUTH-14 | Admin-reported incident can close | Admin reports, technician resolves | Admin POST `/verify` then `/close` | 200 VERIFIED, then 200 CLOSED | Pass (A) |
+| TC-AUTH-15 | No self-assignment | Incident reported by a technician | Admin POST `/assign` with the reporter's id | 409 `SELF_ASSIGNMENT_NOT_ALLOWED` | Pass (A) |
 | TC-AUTH-11 | Last-admin / technician-with-work guard | Admin token; technician has active incidents | Deactivate technician with active work | 409 `TECHNICIAN_HAS_ACTIVE_INCIDENTS`; data unchanged | Pass (M) |
 
 ### Incident lifecycle
@@ -95,7 +101,7 @@ invariant enforced in design.
 | TC-INC-09 | Feedback before resolution | Reporter, IN_PROGRESS incident | POST feedback | 409 `FEEDBACK_NOT_AVAILABLE` | Pass (M) |
 | TC-INC-10 | Duplicate feedback | Reporter, closed incident with feedback | POST feedback again | 409 `FEEDBACK_ALREADY_PROVIDED` | Pass (M) |
 | TC-INC-11 | Admin cancels early incident | Admin token, ASSIGNED incident | POST `/cancel` with reason | 200; CANCELLED; reason in closure notes; audit | Pass (M) |
-| TC-INC-12 | Close before verification is rejected | Admin, RESOLVED incident | POST `/close` | 409 `INCIDENT_NOT_VERIFIED` | Pass (M) |
+| TC-INC-12 | Close before verification is rejected | Admin, RESOLVED incident | POST `/close` | 409 `INVALID_STATE_TRANSITION` (“You cannot close an incident that is Resolved.”) | Pass (M) |
 | TC-INC-13 | Reopen resolution | Reporter, RESOLVED incident | POST `/reopen` | 200; IN_PROGRESS; audit; SLA clock continues | Pass (R) |
 | TC-INC-14 | Incident detail access | Reporter, assigned tech, admin | GET detail | Full data for authorized actors only; comments/audit included | Pass (M) |
 

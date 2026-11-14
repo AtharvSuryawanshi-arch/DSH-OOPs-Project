@@ -224,13 +224,16 @@ export interface TechnicianRecommendation {
 }
 
 export interface DuplicateCandidate {
-  incidentId: number
+  /** Null when the viewer may not open the matching incident. */
+  incidentId: number | null
   reference: string
-  title: string
+  /** Null when the viewer may not open the matching incident. */
+  title: string | null
   status: IncidentStatus
   priority: Priority
   score: number
   createdAt: string
+  accessible: boolean
 }
 
 export interface ResolutionSuggestion {
